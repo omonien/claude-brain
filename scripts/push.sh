@@ -32,9 +32,12 @@ $QUIET && export_args+=(--quiet)
 $SKIP_SECRET_SCAN && export_args+=(--skip-secret-scan)
 "${SCRIPT_DIR}/export.sh" "${export_args[@]}"
 
-# Check if anything actually changed
+# Check if anything actually changed.
+# `git status --porcelain` detects both modified-tracked and new-untracked paths;
+# the prior `git diff --quiet` only saw tracked files, so first-time registrations
+# (machines/<new_id>/ is brand-new and untracked) silently skipped the push.
 if ! $FORCE && ! $DRY_RUN; then
-  if brain_git diff --quiet -- "machines/${machine_id}/" 2>/dev/null; then
+  if [ -z "$(brain_git status --porcelain -- "machines/${machine_id}/" 2>/dev/null)" ]; then
     log_info "No changes to push."
     exit 0
   fi
