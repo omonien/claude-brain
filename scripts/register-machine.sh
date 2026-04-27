@@ -30,16 +30,34 @@ register_machine() {
   os_type=$(detect_os)
   timestamp=$(now_iso)
 
-  # Preserve sync timestamps from existing config so re-registration doesn't wipe them
+  # Preserve state from existing config so re-registration doesn't wipe settings.
+  # push.sh invokes register-machine.sh on every push to refresh meta/machines.json,
+  # and without preservation those calls silently flip auto_sync back to true,
+  # disable encryption, and reset registered_at to now() on every push.
   local last_push="null" last_pull="null" last_evolved="null"
+  local existing_auto_sync="true" existing_registered_at="$timestamp"
+  local existing_encryption_enabled="false"
   if [ -f "$BRAIN_CONFIG" ]; then
-    local _lp _lpull _le
+    local _lp _lpull _le _as _ra _enc
     _lp=$(jq -r '.last_push // "null"' "$BRAIN_CONFIG")
     _lpull=$(jq -r '.last_pull // "null"' "$BRAIN_CONFIG")
     _le=$(jq -r '.last_evolved // "null"' "$BRAIN_CONFIG")
+    _as=$(jq -r '.auto_sync // true' "$BRAIN_CONFIG")
+    _ra=$(jq -r '.registered_at // ""' "$BRAIN_CONFIG")
+    _enc=$(jq -r '.encryption.enabled // false' "$BRAIN_CONFIG")
     [ "$_lp" != "null" ] && last_push="\"${_lp}\""
     [ "$_lpull" != "null" ] && last_pull="\"${_lpull}\""
     [ "$_le" != "null" ] && last_evolved="\"${_le}\""
+    existing_auto_sync="$_as"
+    [ -n "$_ra" ] && existing_registered_at="$_ra"
+    existing_encryption_enabled="$_enc"
+  fi
+
+  # If caller didn't pass --encrypt but encryption was previously enabled,
+  # carry it forward — push.sh never passes --encrypt, so without this every
+  # push silently disables encryption for users who initialized with --encrypt.
+  if [ "$enable_encryption" != "true" ] && [ "$existing_encryption_enabled" = "true" ]; then
+    enable_encryption=true
   fi
 
   # Discover tracked projects
@@ -65,8 +83,8 @@ register_machine() {
         --arg mn "$machine_name" \
         --arg os "$os_type" \
         --arg repo "$BRAIN_REPO" \
-        --argjson sync true \
-        --arg ts "$timestamp" \
+        --argjson sync "$existing_auto_sync" \
+        --arg ts "$existing_registered_at" \
         --argjson lp "$last_push" \
         --argjson lpull "$last_pull" \
         --argjson le "$last_evolved" \
@@ -99,8 +117,8 @@ register_machine() {
         --arg mn "$machine_name" \
         --arg os "$os_type" \
         --arg repo "$BRAIN_REPO" \
-        --argjson sync true \
-        --arg ts "$timestamp" \
+        --argjson sync "$existing_auto_sync" \
+        --arg ts "$existing_registered_at" \
         --argjson lp "$last_push" \
         --argjson lpull "$last_pull" \
         --argjson le "$last_evolved" \
