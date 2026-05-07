@@ -215,6 +215,9 @@ See the full [Security Notice](#security-notice) below.
 | macOS | Fully supported (Apple Silicon + Intel) |
 | WSL | Fully supported (WSL2 recommended) |
 | Windows native | Not supported (use WSL) |
+| Claude Code Cloud | Not supported |
+
+claude-brain runs as a local plugin that hooks `SessionStart`/`SessionEnd` to shell out to `git` and read/write `~/.claude/`. Cloud sessions are ephemeral, sandboxed, and don't have a persistent `~/.claude` to sync to, so the current architecture doesn't apply. See [#32](https://github.com/toroleapinc/claude-brain/issues/32) for the discussion of what a future read-only Cloud variant could look like.
 
 ## Dependencies
 
