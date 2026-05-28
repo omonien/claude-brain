@@ -827,20 +827,23 @@ EOF
   local output
   output=$(bash "$PROJECT_DIR/scripts/import.sh" "$TEST_DIR/kb-brain.json" --no-backup 2>&1) || true
 
+  # When the bug fires, both assertions below would fail (crash detected AND
+  # `Brain import complete.` missing). Return on the first failure so the test
+  # reports one clear root cause per run instead of two correlated failures.
   if echo "$output" | grep -qi "object.*and array.*cannot be sorted"; then
     fail "keybindings merge still crashes on object shape"
-  else
-    pass "keybindings merge handled object shape without crashing"
+    return
   fi
+  pass "keybindings merge handled object shape without crashing"
 
   # The keybindings step is followed by the shared-namespace import and a final
   # "Brain import complete." log line. If the crash propagated through `set -e`,
   # that line never prints. Assert we made it past keybindings.
-  if echo "$output" | grep -q "Brain import complete"; then
-    pass "import continued past keybindings step ('Brain import complete' logged)"
-  else
+  if ! echo "$output" | grep -q "Brain import complete"; then
     fail "import aborted at keybindings step — 'Brain import complete' missing"
+    return
   fi
+  pass "import continued past keybindings step ('Brain import complete' logged)"
 }
 
 # ── Run ────────────────────────────────────────────────────────────────────────

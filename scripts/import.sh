@@ -297,14 +297,20 @@ import_brain() {
           log_info "Updated: keybindings.json (merged)"
         elif [ "$remote_kb_type" = "array" ] && [ "$local_kb_type" != "array" ]; then
           # Local is empty-object / unexpected shape; remote has real bindings — adopt remote.
-          echo "$new_keybindings" > "${CLAUDE_DIR}/keybindings.json"
+          local tmp
+          tmp=$(brain_mktemp)
+          printf '%s\n' "$new_keybindings" > "$tmp"
+          mv "$tmp" "${CLAUDE_DIR}/keybindings.json"
           log_info "Updated: keybindings.json (replaced — local was $local_kb_type)"
         else
           # Either remote is empty/non-array, or both are non-arrays. Nothing to merge.
           log_info "Skipped keybindings merge (local=$local_kb_type, remote=$remote_kb_type)"
         fi
       else
-        echo "$new_keybindings" > "${CLAUDE_DIR}/keybindings.json"
+        local tmp
+        tmp=$(brain_mktemp)
+        printf '%s\n' "$new_keybindings" > "$tmp"
+        mv "$tmp" "${CLAUDE_DIR}/keybindings.json"
         log_info "Created: keybindings.json"
       fi
     fi
