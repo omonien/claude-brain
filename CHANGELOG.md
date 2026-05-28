@@ -5,6 +5,16 @@ All notable changes to claude-brain will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **Headless `claude -p` merge/evolve calls polluted the Claude Code session list.** Every brain sync triggered a new session entry titled "You are merging knowledge bases from the same person…" — on machines with frequent resumes, dozens piled up. Now passes `--no-session-persistence` to both `merge-semantic.sh` and `evolve.sh` so these one-shot calls leave no trace in the session picker.
+
+### Added
+- **Per-run detail logs** under `~/.claude/brain-runs/` capture what previously vanished into `/dev/null` (the merge call's stderr) and into the Claude Code session list (the response payload). Each invocation records action, model, duration, exit code, stderr, and a truncated response — useful for diagnosing merge fallbacks and budget exhaustion.
+- **`/brain-log verbose [<n>]`** surfaces the detail log for a given merge-log entry (default: most recent). Detail logs are machine-local; entries from other machines report "log lives on the producing machine."
+- `merge-log.json` entries now carry an optional `run_log` field pointing to the detail file. Older entries (without the field) continue to render correctly.
+
 ## [0.2.0] - 2026-05-07
 
 ### Fixed

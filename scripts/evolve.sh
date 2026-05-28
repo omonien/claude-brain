@@ -117,16 +117,38 @@ SCHEMA='{
 # ── Run analysis ───────────────────────────────────────────────────────────────
 log_info "Analyzing brain for evolution opportunities..."
 
+# Per-run log: captures stderr/response that previously vanished into the
+# Claude Code session list (which we also suppress via --no-session-persistence).
+RUN_LOG=$(run_log_init "evolve")
+run_log_field "model" "sonnet"
+run_log_field "max_turns" "1"
+run_log_field "max_budget_usd" "0.50"
+run_log_field "auto_mode" "$AUTO_MODE"
+run_log_field "prompt_bytes" "${#PROMPT}"
+
+STDERR_FILE=$(brain_mktemp)
+start_epoch=$(date +%s)
+EXIT_CODE=0
 RESULT=$(claude -p "$PROMPT" \
+  --no-session-persistence \
   --output-format json \
   --json-schema "$SCHEMA" \
   --model sonnet \
   --max-turns 1 \
   --max-budget-usd 0.50 \
-  2>/dev/null) || {
-  log_error "Evolution analysis failed."
+  2>"$STDERR_FILE") || EXIT_CODE=$?
+end_epoch=$(date +%s)
+
+run_log_field "duration_seconds" "$((end_epoch - start_epoch))"
+run_log_field "exit_code" "$EXIT_CODE"
+run_log_file   "stderr" "$STDERR_FILE"
+run_log_blob   "response_json" "$RESULT"
+
+if [ "$EXIT_CODE" -ne 0 ]; then
+  log_error "Evolution analysis failed (exit $EXIT_CODE). See $RUN_LOG."
+  append_merge_log "evolve" "Evolution analysis failed (exit $EXIT_CODE)" "$RUN_LOG"
   exit 1
-}
+fi
 
 # ── Output results ─────────────────────────────────────────────────────────────
 summary=$(echo "$RESULT" | jq -r '.structured_output.summary // "No summary"')
@@ -170,3 +192,14 @@ if $AUTO_MODE; then
   log_info "Auto-evolve complete. High-confidence changes applied."
   log_info "Evolution analysis saved to meta/last-evolve.json"
 fi
+
+run_log_section "summary"
+{
+  echo "promotions: $promo_count"
+  echo "stale_entries: $stale_count"
+  echo "result: success"
+} >> "$RUN_LOG_PATH"
+
+append_merge_log "evolve" \
+  "Analyzed brain (${promo_count} promotions, ${stale_count} stale)" \
+  "$RUN_LOG"

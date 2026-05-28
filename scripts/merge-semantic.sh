@@ -152,14 +152,41 @@ SCHEMA='{
 # ── Call claude -p ─────────────────────────────────────────────────────────────
 log_info "Running semantic merge via claude..."
 
+# Per-run log: replaces the silent stderr discard with a structured record under
+# ${BRAIN_REPO}/meta/merge-runs/. --no-session-persistence keeps these headless
+# calls out of the Claude Code session list.
+RUN_LOG=$(run_log_init "merge")
+run_log_field "model" "sonnet"
+run_log_field "max_turns" "10"
+run_log_field "max_budget_usd" "$MAX_BUDGET"
+run_log_field "snapshot_count" "${#SNAPSHOTS[@]}"
+run_log_field "prompt_bytes" "$(wc -c < "$PROMPT_FILE" | tr -d ' ')"
+
+# Publish for pull.sh callers to attach the log to the merge-log entry.
+# The marker lives outside the synced repo (machine-local diagnostics).
+mkdir -p "$BRAIN_RUNS_DIR"
+echo "$RUN_LOG" > "${BRAIN_RUNS_DIR}/.last-run-log"
+
+STDERR_FILE=$(brain_mktemp)
+start_epoch=$(date +%s)
+EXIT_CODE=0
 RESULT=$(cat "$PROMPT_FILE" | claude -p - \
+  --no-session-persistence \
   --output-format json \
   --json-schema "$SCHEMA" \
   --model sonnet \
   --max-turns 10 \
   --max-budget-usd "$MAX_BUDGET" \
-  2>/dev/null) || {
-  log_warn "claude -p failed. Falling back to concatenation merge."
+  2>"$STDERR_FILE") || EXIT_CODE=$?
+end_epoch=$(date +%s)
+
+run_log_field "duration_seconds" "$((end_epoch - start_epoch))"
+run_log_field "exit_code" "$EXIT_CODE"
+run_log_file   "stderr" "$STDERR_FILE"
+run_log_blob   "response_json" "$RESULT"
+
+if [ "$EXIT_CODE" -ne 0 ]; then
+  log_warn "claude -p failed (exit $EXIT_CODE). See $RUN_LOG. Falling back to concatenation merge."
   # Fallback: use first snapshot as base, append others with markers
   base_snapshot="${SNAPSHOTS[0]}"
   cp "$base_snapshot" "$OUTPUT"
@@ -185,7 +212,7 @@ ${claude_md_content}"
   jq --arg content "$fallback_claude_md" \
     '.declarative.claude_md.content = $content' "$OUTPUT" > "$tmp" && mv "$tmp" "$OUTPUT"
   exit 0
-}
+fi
 
 # ── Parse result and update brain ──────────────────────────────────────────────
 merged_claude_md=$(echo "$RESULT" | jq -r '.structured_output.merged_claude_md // empty')
@@ -247,5 +274,12 @@ dedup_count=$(echo "$deduped" | jq 'length')
 if [ "$dedup_count" -gt 0 ]; then
   log_info "${dedup_count} duplicate entries removed."
 fi
+
+run_log_section "summary"
+{
+  echo "conflicts: $conflict_count"
+  echo "deduped: $dedup_count"
+  echo "result: success"
+} >> "$RUN_LOG_PATH"
 
 log_info "Semantic merge complete."

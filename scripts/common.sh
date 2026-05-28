@@ -249,7 +249,10 @@ log_warn() { brain_log "WARN" "$@"; }
 log_error() { brain_log "ERROR" "$@"; }
 
 append_merge_log() {
-  local action="$1" summary="$2"
+  # Args: <action> <summary> [run_log_path]
+  # run_log_path is optional; when given it's stored relative to BRAIN_REPO so
+  # /brain-log can resolve and display the detailed run log.
+  local action="$1" summary="$2" run_log="${3:-}"
   local log_file="${BRAIN_REPO}/meta/merge-log.json"
   local timestamp
   timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -257,6 +260,10 @@ append_merge_log() {
   machine_id=$(get_machine_id)
   local machine_name
   machine_name=$(get_machine_name)
+
+  # Detail logs are machine-local (under ~/.claude/brain-runs/); we store the
+  # absolute path. Machines that pull this entry won't have the file — that's
+  # by design; /brain-log verbose reports it as remote-only in that case.
 
   if [ ! -f "$log_file" ]; then
     echo '{"entries":[]}' > "$log_file"
@@ -269,8 +276,94 @@ append_merge_log() {
      --arg mn "$machine_name" \
      --arg act "$action" \
      --arg sum "$summary" \
-     '.entries = [{"timestamp":$ts,"machine_id":$mid,"machine_name":$mn,"action":$act,"summary":$sum}] + .entries | .entries = .entries[:200]' \
+     --arg log "$run_log" \
+     '.entries = [{"timestamp":$ts,"machine_id":$mid,"machine_name":$mn,"action":$act,"summary":$sum,"run_log":$log}] + .entries | .entries = .entries[:200]' \
      "$log_file" > "$tmp" && mv "$tmp" "$log_file"
+}
+
+# ── Detailed run logs ──────────────────────────────────────────────────────────
+# Each claude -p invocation (merge, evolve, …) writes a per-run log under
+# ${BRAIN_RUNS_DIR}. Logs capture stderr, exit code, duration and the (truncated)
+# response payload — replacing what previously vanished into the Claude Code
+# session list. /brain-log verbose surfaces them.
+#
+# These logs are machine-local on purpose: they contain transient diagnostics
+# (stderr, raw responses) that would bloat the synced brain repo and could leak
+# environment details across machines. The merge-log itself stays in the repo;
+# only the detail files live outside.
+#
+# Usage:
+#   path=$(run_log_init <action>)        # creates header, sets RUN_LOG_PATH
+#   run_log_field <key> <value>          # one-line key:value entry
+#   run_log_section <heading>            # markdown-style section
+#   run_log_file <heading> <path>        # dump file contents under a heading
+#   run_log_blob <heading> <content>     # dump a string under a heading
+RUN_LOG_PATH=""
+RUN_LOG_MAX_PAYLOAD_BYTES="${RUN_LOG_MAX_PAYLOAD_BYTES:-200000}"
+BRAIN_RUNS_DIR="${BRAIN_RUNS_DIR:-${HOME}/.claude/brain-runs}"
+
+run_log_init() {
+  local action="$1"
+  local dir="${BRAIN_RUNS_DIR}"
+  mkdir -p "$dir"
+  local ts
+  ts=$(date -u +"%Y%m%dT%H%M%SZ")
+  RUN_LOG_PATH="${dir}/${ts}-${action}.log"
+  {
+    echo "# claude-brain-sync run log"
+    echo "action: ${action}"
+    echo "timestamp: $(now_iso)"
+    echo "machine: $(get_machine_name) ($(get_machine_id))"
+    echo "host_os: $(uname -s)"
+    echo
+  } > "$RUN_LOG_PATH"
+  echo "$RUN_LOG_PATH"
+}
+
+run_log_field() {
+  [ -n "$RUN_LOG_PATH" ] || return 0
+  printf "%s: %s\n" "$1" "$2" >> "$RUN_LOG_PATH"
+}
+
+run_log_section() {
+  [ -n "$RUN_LOG_PATH" ] || return 0
+  {
+    echo
+    echo "## $1"
+    echo
+  } >> "$RUN_LOG_PATH"
+}
+
+run_log_file() {
+  [ -n "$RUN_LOG_PATH" ] || return 0
+  local heading="$1" file="$2"
+  run_log_section "$heading"
+  if [ -f "$file" ] && [ -s "$file" ]; then
+    # Truncate to keep logs sane on big responses
+    head -c "$RUN_LOG_MAX_PAYLOAD_BYTES" "$file" >> "$RUN_LOG_PATH"
+    local size
+    size=$(wc -c < "$file" | tr -d ' ')
+    if [ "$size" -gt "$RUN_LOG_MAX_PAYLOAD_BYTES" ]; then
+      printf "\n…[truncated %d bytes from %d total]\n" \
+        $((size - RUN_LOG_MAX_PAYLOAD_BYTES)) "$size" >> "$RUN_LOG_PATH"
+    fi
+  else
+    echo "(empty)" >> "$RUN_LOG_PATH"
+  fi
+  echo >> "$RUN_LOG_PATH"
+}
+
+run_log_blob() {
+  [ -n "$RUN_LOG_PATH" ] || return 0
+  local heading="$1" content="$2"
+  run_log_section "$heading"
+  printf "%s" "$content" | head -c "$RUN_LOG_MAX_PAYLOAD_BYTES" >> "$RUN_LOG_PATH"
+  local size=${#content}
+  if [ "$size" -gt "$RUN_LOG_MAX_PAYLOAD_BYTES" ]; then
+    printf "\n…[truncated %d bytes from %d total]\n" \
+      $((size - RUN_LOG_MAX_PAYLOAD_BYTES)) "$size" >> "$RUN_LOG_PATH"
+  fi
+  echo >> "$RUN_LOG_PATH"
 }
 
 # ── Timestamp ──────────────────────────────────────────────────────────────────

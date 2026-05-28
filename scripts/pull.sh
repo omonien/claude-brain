@@ -165,8 +165,17 @@ fi
 # Log the merge
 new_consolidated_hash=$(file_hash "${BRAIN_REPO}/consolidated/brain.json")
 if [ "$local_consolidated_hash" != "$new_consolidated_hash" ]; then
-  append_merge_log "pull+merge" "Merged ${snapshot_count} machine snapshots"
+  # Attach the run log produced by merge-semantic.sh (if it ran) so /brain-log
+  # can surface stderr + response details on demand.
+  run_log_marker="${BRAIN_RUNS_DIR}/.last-run-log"
+  run_log_path=""
+  if [ -f "$run_log_marker" ]; then
+    run_log_path=$(cat "$run_log_marker")
+    rm -f "$run_log_marker"
+  fi
+  append_merge_log "pull+merge" "Merged ${snapshot_count} machine snapshots" "$run_log_path"
   log_info "Brain synced: merged ${snapshot_count} machine(s)."
 else
+  rm -f "${BRAIN_RUNS_DIR}/.last-run-log" 2>/dev/null || true
   log_info "Brain synced: no changes."
 fi
