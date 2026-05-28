@@ -153,9 +153,16 @@ SCHEMA='{
 log_info "Running semantic merge via claude..."
 
 # Per-run log: replaces the silent stderr discard with a structured record
-# under ${BRAIN_RUNS_DIR}. --no-session-persistence keeps these headless calls
-# out of the Claude Code session list. run_log_init must NOT be captured via
-# $(...) — that would isolate RUN_LOG_PATH in a subshell.
+# under ${BRAIN_RUNS_DIR}. Two flags matter on the claude -p call below:
+#   --bare                     CRITICAL: skip hooks/plugin-sync. Without this
+#                              the child claude -p re-runs the brain-sync
+#                              SessionStart hook → pull.sh → merge-semantic.sh
+#                              → another claude -p. Fork bomb, one new merge
+#                              process every few seconds until manual kill.
+#   --no-session-persistence   Defense in depth: keep the (now hookless)
+#                              headless call out of the session picker.
+# run_log_init must NOT be captured via $(...) — that would isolate
+# RUN_LOG_PATH in a subshell.
 run_log_init "merge"
 RUN_LOG="$RUN_LOG_PATH"
 run_log_field "model" "sonnet"
@@ -172,6 +179,7 @@ STDERR_FILE=$(brain_mktemp)
 start_epoch=$(date +%s)
 EXIT_CODE=0
 RESULT=$(cat "$PROMPT_FILE" | claude -p - \
+  --bare \
   --no-session-persistence \
   --output-format json \
   --json-schema "$SCHEMA" \

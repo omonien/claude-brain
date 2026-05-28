@@ -118,7 +118,16 @@ SCHEMA='{
 log_info "Analyzing brain for evolution opportunities..."
 
 # Per-run log: captures stderr/response that previously vanished into the
-# Claude Code session list (which we also suppress via --no-session-persistence).
+# Claude Code session list. Two flags matter on the claude -p call below:
+#   --bare                     CRITICAL: skip hooks/plugin-sync. Without this
+#                              the child claude -p re-runs the brain-sync
+#                              SessionStart hook → pull.sh → merge-semantic.sh
+#                              → another claude -p. Fork bomb. (Even though
+#                              evolve.sh itself doesn't fan out, the same
+#                              guarantee belongs here for symmetry and to
+#                              prevent any future hook from misfiring.)
+#   --no-session-persistence   Defense in depth: keep the (now hookless)
+#                              headless call out of the session picker.
 # run_log_init must NOT be captured via $(...) — that would isolate
 # RUN_LOG_PATH in a subshell.
 run_log_init "evolve"
@@ -133,6 +142,7 @@ STDERR_FILE=$(brain_mktemp)
 start_epoch=$(date +%s)
 EXIT_CODE=0
 RESULT=$(claude -p "$PROMPT" \
+  --bare \
   --no-session-persistence \
   --output-format json \
   --json-schema "$SCHEMA" \
