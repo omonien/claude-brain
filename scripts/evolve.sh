@@ -119,7 +119,10 @@ log_info "Analyzing brain for evolution opportunities..."
 
 # Per-run log: captures stderr/response that previously vanished into the
 # Claude Code session list (which we also suppress via --no-session-persistence).
-RUN_LOG=$(run_log_init "evolve")
+# run_log_init must NOT be captured via $(...) — that would isolate
+# RUN_LOG_PATH in a subshell.
+run_log_init "evolve"
+RUN_LOG="$RUN_LOG_PATH"
 run_log_field "model" "sonnet"
 run_log_field "max_turns" "1"
 run_log_field "max_budget_usd" "0.50"

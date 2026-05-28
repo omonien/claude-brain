@@ -152,10 +152,12 @@ SCHEMA='{
 # ── Call claude -p ─────────────────────────────────────────────────────────────
 log_info "Running semantic merge via claude..."
 
-# Per-run log: replaces the silent stderr discard with a structured record under
-# ${BRAIN_REPO}/meta/merge-runs/. --no-session-persistence keeps these headless
-# calls out of the Claude Code session list.
-RUN_LOG=$(run_log_init "merge")
+# Per-run log: replaces the silent stderr discard with a structured record
+# under ${BRAIN_RUNS_DIR}. --no-session-persistence keeps these headless calls
+# out of the Claude Code session list. run_log_init must NOT be captured via
+# $(...) — that would isolate RUN_LOG_PATH in a subshell.
+run_log_init "merge"
+RUN_LOG="$RUN_LOG_PATH"
 run_log_field "model" "sonnet"
 run_log_field "max_turns" "10"
 run_log_field "max_budget_usd" "$MAX_BUDGET"
@@ -163,8 +165,7 @@ run_log_field "snapshot_count" "${#SNAPSHOTS[@]}"
 run_log_field "prompt_bytes" "$(wc -c < "$PROMPT_FILE" | tr -d ' ')"
 
 # Publish for pull.sh callers to attach the log to the merge-log entry.
-# The marker lives outside the synced repo (machine-local diagnostics).
-mkdir -p "$BRAIN_RUNS_DIR"
+# Marker lives outside the synced repo (machine-local diagnostics).
 echo "$RUN_LOG" > "${BRAIN_RUNS_DIR}/.last-run-log"
 
 STDERR_FILE=$(brain_mktemp)

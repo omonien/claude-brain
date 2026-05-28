@@ -293,7 +293,9 @@ append_merge_log() {
 # only the detail files live outside.
 #
 # Usage:
-#   path=$(run_log_init <action>)        # creates header, sets RUN_LOG_PATH
+#   run_log_init <action>                # sets RUN_LOG_PATH in the caller's
+#                                        # shell. Do NOT capture via $(...) —
+#                                        # the subshell would isolate the var.
 #   run_log_field <key> <value>          # one-line key:value entry
 #   run_log_section <heading>            # markdown-style section
 #   run_log_file <heading> <path>        # dump file contents under a heading
@@ -317,7 +319,6 @@ run_log_init() {
     echo "host_os: $(uname -s)"
     echo
   } > "$RUN_LOG_PATH"
-  echo "$RUN_LOG_PATH"
 }
 
 run_log_field() {
