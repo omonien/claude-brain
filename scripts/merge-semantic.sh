@@ -3,6 +3,13 @@
 # Uses claude -p with structured output for intelligent deduplication and conflict resolution
 # Supports N-way merge: all machine snapshots merged in a single prompt
 set -euo pipefail
+
+# Note: this script is intentionally callable while BRAIN_SYNC_ACTIVE is set —
+# it is invoked as a child of pull.sh, which has already set the flag. Fork-bomb
+# protection lives in the SessionStart hook (which suppresses the hook when the
+# flag is inherited via env), not here. Keep BRAIN_SYNC_ACTIVE in the env so
+# the claude -p subprocess inherits it and its own SessionStart hook stays quiet.
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/common.sh"
 
@@ -153,14 +160,12 @@ SCHEMA='{
 log_info "Running semantic merge via claude..."
 
 # Per-run log: replaces the silent stderr discard with a structured record
-# under ${BRAIN_RUNS_DIR}. Two flags matter on the claude -p call below:
-#   --bare                     CRITICAL: skip hooks/plugin-sync. Without this
-#                              the child claude -p re-runs the brain-sync
-#                              SessionStart hook → pull.sh → merge-semantic.sh
-#                              → another claude -p. Fork bomb, one new merge
-#                              process every few seconds until manual kill.
-#   --no-session-persistence   Defense in depth: keep the (now hookless)
-#                              headless call out of the session picker.
+# under ${BRAIN_RUNS_DIR}. Flag rationale on the claude -p call below:
+#   --no-session-persistence   Keep the headless call out of the session picker.
+# Fork-bomb prevention: we used to pass --bare here, which also disabled
+# keychain reads — breaking OAuth auth. Now we rely on BRAIN_SYNC_ACTIVE
+# (exported above) being inherited by the claude -p child process. The
+# brain-sync SessionStart hook checks that env var and refuses to recurse.
 # run_log_init must NOT be captured via $(...) — that would isolate
 # RUN_LOG_PATH in a subshell.
 run_log_init "merge"
@@ -179,7 +184,6 @@ STDERR_FILE=$(brain_mktemp)
 start_epoch=$(date +%s)
 EXIT_CODE=0
 RESULT=$(cat "$PROMPT_FILE" | claude -p - \
-  --bare \
   --no-session-persistence \
   --output-format json \
   --json-schema "$SCHEMA" \
@@ -196,26 +200,36 @@ run_log_blob   "response_json" "$RESULT"
 
 if [ "$EXIT_CODE" -ne 0 ]; then
   log_warn "claude -p failed (exit $EXIT_CODE). See $RUN_LOG. Falling back to concatenation merge."
-  # Fallback: use first snapshot as base, append others with markers
+  # Fallback: use first snapshot as base, append others with markers.
+  # Idempotency: strip any pre-existing "Unmerged content" sections from BOTH
+  # the base and each incoming snapshot before comparison. Without this, every
+  # fallback run grew CLAUDE.md by one marker block — accumulated 7 identical
+  # copies across 6 syncs in the wild before this fix landed.
   base_snapshot="${SNAPSHOTS[0]}"
   cp "$base_snapshot" "$OUTPUT"
-  
-  # Collect unique CLAUDE.md content to append
+
+  # Strip everything from the first marker onward.
+  strip_markers() {
+    awk '/<!-- === Unmerged content from .* === -->/{exit} {print}' <<< "$1"
+  }
+
   base_claude_md=$(jq -r '.declarative.claude_md.content // ""' "$base_snapshot")
-  fallback_claude_md="$base_claude_md"
-  
+  base_claude_md_clean=$(strip_markers "$base_claude_md")
+  fallback_claude_md="$base_claude_md_clean"
+
   for snapshot_file in "${SNAPSHOTS[@]:1}"; do
     machine_name=$(jq -r '.machine.name // "unknown"' "$snapshot_file")
     claude_md_content=$(jq -r '.declarative.claude_md.content // ""' "$snapshot_file")
-    
-    if [ -n "$claude_md_content" ] && [ "$claude_md_content" != "$base_claude_md" ]; then
+    claude_md_clean=$(strip_markers "$claude_md_content")
+
+    if [ -n "$claude_md_clean" ] && [ "$claude_md_clean" != "$base_claude_md_clean" ]; then
       fallback_claude_md="${fallback_claude_md}
 
 <!-- === Unmerged content from ${machine_name} === -->
-${claude_md_content}"
+${claude_md_clean}"
     fi
   done
-  
+
   # Update output with concatenated content
   tmp=$(brain_mktemp)
   jq --arg content "$fallback_claude_md" \

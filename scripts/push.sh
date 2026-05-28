@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 # push.sh — Export brain snapshot and push to Git remote
 set -euo pipefail
+
+# Fork-bomb hard-stop: refuse to run if already nested inside an active sync.
+if [ -n "${BRAIN_SYNC_ACTIVE:-}" ]; then
+  echo "[claude-brain] push: BRAIN_SYNC_ACTIVE set — refusing recursive invocation." >&2
+  exit 0
+fi
+export BRAIN_SYNC_ACTIVE=1
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/common.sh"
 
