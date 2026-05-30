@@ -56,17 +56,26 @@ ok "Marketplace HEAD: $mp_head"
 
 # ── 2. Patches im Marketplace vorhanden ────────────────────────────────────────
 mp_files_ok=true
+# Detection markers for the fix:
+#   - pull.sh has the BRAIN_SYNC_ACTIVE env-var recursion guard
+#   - merge-semantic.sh / evolve.sh pass --no-session-persistence
+# Earlier (66fb048) the recursion fix was --bare on the claude -p call, but
+# that broke OAuth auth — 5d6312f replaced it with the env-var guard. We
+# check for the env-var guard (the canonical signal) and the persistence flag.
+if ! grep -q "BRAIN_SYNC_ACTIVE" scripts/pull.sh; then
+  err "scripts/pull.sh hat keinen BRAIN_SYNC_ACTIVE Recursion-Guard"
+  mp_files_ok=false
+  fail=1
+fi
 for f in scripts/merge-semantic.sh scripts/evolve.sh; do
-  if grep -q -- "--bare" "$f" && grep -q -- "--no-session-persistence" "$f"; then
-    :
-  else
-    err "$f im Marketplace enthält die Patches NICHT (--bare/--no-session-persistence fehlt)"
+  if ! grep -q -- "--no-session-persistence" "$f"; then
+    err "$f enthält --no-session-persistence nicht"
     mp_files_ok=false
     fail=1
   fi
 done
 if $mp_files_ok; then
-  ok "--bare + --no-session-persistence im Marketplace verifiziert"
+  ok "Recursion-Guard + --no-session-persistence im Marketplace verifiziert"
 fi
 
 # ── 3. Cache existiert? Falls ja: Patches vorhanden? ──────────────────────────
@@ -88,8 +97,9 @@ else
   patched_count=0
   unpatched_dirs=()
   for d in "${cache_dirs[@]}"; do
-    if grep -q -- "--bare" "$d/scripts/merge-semantic.sh" 2>/dev/null && \
-       grep -q -- "--bare" "$d/scripts/evolve.sh" 2>/dev/null; then
+    # A cache is "patched" if it has the recursion guard AND the persistence flag.
+    if grep -q "BRAIN_SYNC_ACTIVE" "$d/scripts/pull.sh" 2>/dev/null && \
+       grep -q -- "--no-session-persistence" "$d/scripts/merge-semantic.sh" 2>/dev/null; then
       ok "Patches aktiv in: $d/scripts/"
       patched_count=$((patched_count+1))
     else
@@ -109,7 +119,8 @@ else
       if [ -f "$MARKETPLACE/skills/brain-log/SKILL.md" ] && [ -d "$d/skills/brain-log" ]; then
         cp "$MARKETPLACE/skills/brain-log/SKILL.md" "$d/skills/brain-log/SKILL.md"
       fi
-      if grep -q -- "--bare" "$d/scripts/merge-semantic.sh"; then
+      if grep -q "BRAIN_SYNC_ACTIVE" "$d/scripts/pull.sh" && \
+         grep -q -- "--no-session-persistence" "$d/scripts/merge-semantic.sh"; then
         ok "  ✓ Nachgepatcht: $d"
       else
         err "  ✗ Nachpatch in $d fehlgeschlagen"

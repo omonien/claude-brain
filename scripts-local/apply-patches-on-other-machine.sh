@@ -4,6 +4,12 @@
 # Bringt eine zweite Maschine (z.B. Windows VM unter Git Bash) auf den
 # gepatchten claude-brain-sync Stand (Fork omonien/claude-brain @ main).
 #
+# Aktuelle Patches auf main (Commits c947e09 … 5d6312f):
+#   - Per-run Detail-Logs unter ~/.claude/brain-runs/
+#   - --no-session-persistence auf claude -p (keine Session-Liste-Einträge)
+#   - BRAIN_SYNC_ACTIVE env-var Recursion-Guard in pull.sh (Fork-Bombe-Stopper)
+#   - Idempotenz-Fix für Fallback-Merge (kein Wachstum bei wiederholten Syncs)
+#
 # Was es tut:
 #   1. Lokal laufende Fork-Bomben-Prozesse killen (claude -p Merge-Aufrufe)
 #   2. Marketplace-Klon von toroleapinc → omonien umstellen und auf main holen
@@ -93,11 +99,19 @@ mp_head=$(git log --oneline -1)
 ok "  Marketplace HEAD: $mp_head"
 
 # Sanity check: enthält der Marketplace die Patches?
-if ! grep -q -- "--bare" scripts/merge-semantic.sh; then
-  err "Marketplace HEAD enthält kein --bare. Erwartete Commit 66fb048 oder neuer. Abbruch."
+# Marker:
+#   - scripts/pull.sh hat den BRAIN_SYNC_ACTIVE env-var recursion guard
+#   - scripts/merge-semantic.sh hat --no-session-persistence
+# (Frühere Versionen nutzten --bare statt env-var, das brach aber OAuth.)
+if ! grep -q "BRAIN_SYNC_ACTIVE" scripts/pull.sh; then
+  err "Marketplace HEAD hat keinen BRAIN_SYNC_ACTIVE Recursion-Guard. Erwartet 5d6312f oder neuer. Abbruch."
   exit 1
 fi
-ok "  Patches im Marketplace verifiziert (--bare + --no-session-persistence)"
+if ! grep -q -- "--no-session-persistence" scripts/merge-semantic.sh; then
+  err "Marketplace HEAD enthält --no-session-persistence nicht. Abbruch."
+  exit 1
+fi
+ok "  Patches im Marketplace verifiziert (BRAIN_SYNC_ACTIVE guard + --no-session-persistence)"
 
 # ── 3. Plugin-Cache mit Marketplace-Scripts überschreiben ─────────────────────
 # Der Cache ist die Version, die der SessionStart-Hook tatsächlich ausführt
@@ -126,8 +140,10 @@ else
     if [ -f "$MARKETPLACE/skills/brain-log/SKILL.md" ] && [ -d "$d/skills/brain-log" ]; then
       cp "$MARKETPLACE/skills/brain-log/SKILL.md" "$d/skills/brain-log/SKILL.md"
     fi
-    # Verifikation
-    if grep -q -- "--bare" "$d/scripts/merge-semantic.sh" && grep -q -- "--bare" "$d/scripts/evolve.sh"; then
+    # Verifikation: Recursion-Guard in pull.sh + persistence-Flag in beiden Merge-Scripts
+    if grep -q "BRAIN_SYNC_ACTIVE" "$d/scripts/pull.sh" && \
+       grep -q -- "--no-session-persistence" "$d/scripts/merge-semantic.sh" && \
+       grep -q -- "--no-session-persistence" "$d/scripts/evolve.sh"; then
       ok "  ✓ Patches aktiv in $d/scripts/"
     else
       err "  Patch fehlgeschlagen in $d/scripts/"

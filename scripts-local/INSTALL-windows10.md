@@ -4,8 +4,15 @@ Anleitung für eine **frische Installation** des Plugins (Fork mit Fork-Bomben-F
 auf einer Windows-10-VM, die noch Teil des bestehenden Brain-Netzwerks werden
 soll (Daten-Repo: `omonien/my-claude-brain`).
 
-Plugin-Quelle: `omonien/claude-brain` @ `main` (enthält die Patches
-`--bare` + `--no-session-persistence` + Detail-Logs).
+Plugin-Quelle: `omonien/claude-brain` @ `main`. Enthält gegenüber Upstream:
+- `--no-session-persistence` auf jedem `claude -p` (keine Sessions in der UI-Liste)
+- `BRAIN_SYNC_ACTIVE` Env-Var-Guard in `pull.sh` (verhindert die Fork-Bombe,
+  wo der vom Plugin-Hook gestartete `claude -p` selbst wieder den Hook
+  triggert — eine zweite SessionStart-Kette wird sofort abgebrochen)
+- Per-Run Detail-Logs unter `~/.claude/brain-runs/`, abrufbar via
+  `/brain-log verbose`
+- Idempotenz-Fix für den Concat-Fallback (verhindert wachsende CLAUDE.md
+  bei wiederholten Sync-Fehlern)
 
 ---
 
